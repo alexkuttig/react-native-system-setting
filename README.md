@@ -18,7 +18,7 @@ It provides some system setting APIs for you. Support iOS and Android both.
 
 [Change Log](https://github.com/c19354837/react-native-system-setting/blob/master/CHANGELOG.md)
 
-breaking change for `switchWifiSilence()` in V1.3.0, see [Powerful API](https://github.com/c19354837/react-native-system-setting#powerful-api)
+breaking change for permission since V1.5.0, see [Android Permission](https://github.com/c19354837/react-native-system-setting#android-permission)
 
 ## Look like
 
@@ -64,7 +64,7 @@ dependencies {
 }
 ```
 
-**MainApplication.java**
+**android/app/src/main/java/..packageName../MainApplication.java**
 
 On top, where imports are:
 
@@ -83,7 +83,6 @@ protected List<ReactPackage> getPackages() {
     );
 }
 ```
-
 
 ## Usage
 
@@ -146,6 +145,8 @@ SystemSetting.getAppBrightness().then((brightness)=>{
 })
 ```
 
+> `setBrightness()` & `saveBrightness()` need [permission](https://github.com/c19354837/react-native-system-setting#android-permission) for Android
+
 **Wifi**
 
 ```javascript
@@ -159,6 +160,10 @@ SystemSetting.switchWifi(()=>{
 })
 ```
 
+> `isWifiEnabled()` need [permission](https://github.com/c19354837/react-native-system-setting#android-permission) for Android
+> 
+> `switchWifi()` is disabled by default for iOS since V1.7.0, [enable it](https://github.com/c19354837/react-native-system-setting/blob/master/iOS.md#ios)
+
 **Location**
 
 ```javascript
@@ -171,6 +176,7 @@ SystemSetting.switchLocation(()=>{
     console.log('switch location successfully');
 })
 ```
+> `switchLocation()` is disabled by default for iOS since V1.7.0, [enable it](https://github.com/c19354837/react-native-system-setting/blob/master/iOS.md#ios)
 
 **Bluetooth**
 
@@ -185,6 +191,10 @@ SystemSetting.switchBluetooth(()=>{
 })
 ```
 
+> `isBluetoothEnabled()` need [permission](https://github.com/c19354837/react-native-system-setting#android-permission) for Android
+>
+> All bluetooth-function are disabled by default for iOS since V1.7.0, [enable it](https://github.com/c19354837/react-native-system-setting/blob/master/iOS.md#ios)
+
 **Airplane**
 
 ```javascript
@@ -198,7 +208,16 @@ SystemSetting.switchAirplane(()=>{
 })
 ```
 
+> `isAirplaneEnabled()` will always return `true` for iOS if your device has no SIM card, see [detail](https://github.com/c19354837/react-native-system-setting/issues/37)
+> 
+> `switchAirplane()` is disabled by default for iOS since V1.7.0, [enable it](https://github.com/c19354837/react-native-system-setting/blob/master/iOS.md#ios)
 
+**Other**
+
+```javascript
+// open app setting page
+SystemSetting.openAppSystemSettings()
+```
 
 ## API
 
@@ -215,57 +234,37 @@ $ react-native run-android
 $ react-native run-ios
 ```
 
-## App Store
+## iOS
 
-Some APIs are dangerous for iOS:
-
-* `switchWifi()`
-* `switchBluetooth()`
-* `switchLocation()`
-* `switchAirplane()`
-
-I implement them by using non-public APIs, which is not permitted on the App Store, see [this issure](https://github.com/c19354837/react-native-system-setting/issues/28). 
-
-If you are developing a App Store version, you have to give up these APIs. 
-
-To avoid unnecessary trouble, you can call `SystemSetting.setAppStore(true)` which will invalidate these APIs.
-
-> As an alternative, you can show a tip to tell the user how to change the system setting. 
+To be more friendly to app store, I disable some APIs for iOS since V1.7.0, You can [enable it](https://github.com/c19354837/react-native-system-setting/blob/master/iOS.md#ios) in a few steps.
 
 ## Android permission
+ 
+### API
 
-### Remove permission
+Default permissions are removed since V1.5.0, see [this PR](https://github.com/c19354837/react-native-system-setting/pull/44). You need to declare the corresponding permissions in your app's AndroidManifest.xml, see [example AndroidManifest.xml](https://github.com/c19354837/react-native-system-setting/blob/master/examples/SystemSettingExample/android/app/src/main/AndroidManifest.xml)
 
-To simplify using, I have declared all permission in [AndroidManifest.xml](https://github.com/c19354837/react-native-system-setting/blob/master/android/src/main/AndroidManifest.xml).
-
-And you can delete the permission safely if it's useless for your app.
-
-You can find the file in `yourProject/node_modules/react-native-system-setting/android/src/main/AndroidManifest.xml`. (Be sure that you have run `npm install`)
-
-> These permissions are transparent in iOS, so it's ok for iOS app.
-
-### Runtime permission for Android 6+
-
-Change *brightness* and *screen mode* need `android.permission.WRITE_SETTINGS` which user can disable it in phone Setting. When you call `setScreenMode()`, `setBrightness()` or `setBrightnessForce()` , it will return false if the app has no permission, and you can call `SystemSetting.grantWriteSettingPremission()` to guide user to app setting page. see [example](https://github.com/c19354837/react-native-system-setting/tree/master/examples/SystemSettingExample)
-
-> If you just want to change app's brightness, you can call `setAppBrightness(val)`, and it doesn't require any permission. see [API](https://github.com/c19354837/react-native-system-setting/blob/master/API.md)
-
-### Powerful API
-
-There are some different APIs that end with `silence`. They can do the job programmatically without direct user consent. To make it work, You need to declare the corresponding permissions in your app's AndroidManifest.xml, see [example AndroidManifest.xml](https://github.com/c19354837/react-native-system-setting/blob/master/examples/SystemSettingExample/android/app/src/main/AndroidManifest.xml)
-
-**`yourProject/android/app/src/main/AndroidManifest.xml`**
+**`android/app/src/main/AndroidManifest.xml`**
 
 ```xml
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.systemsettingexample"
+    package="YourPackageName"
     android:versionCode="1"
     android:versionName="1.0">
-
-    <!-- switchWifiSilence() -->
+    
+    <!-- setBrightness() & setScreenMode() & saveBrightness() -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    
+    <!-- isWifiEnabled() -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+    
+    <!-- isBluetoothEnabled() -->
+    <uses-permission android:name="android.permission.BLUETOOTH"/>
+    
+    <!-- * switchWifiSilence() -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE"/>
 
-    <!-- switchBluetoothSilence() -->
+    <!-- * switchBluetoothSilence() -->
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
     
     ...
@@ -273,7 +272,17 @@ There are some different APIs that end with `silence`. They can do the job progr
 </manifest>
 ```
 
-> These APIs maybe useful when you develop a system management app. For , you should call `switchWifi()` & `switchBluetooth()` to get a better user experience
+> There are some different APIs that end with `silence`. They can do the job programmatically without direct user consent. These APIs maybe useful when you develop a system management app. Or, you should call `switchWifi()` & `switchBluetooth()` to get a better user experience
+
+### Do Not Disturb
+
+`setVolume()` may cause a crash: **Not allowed to change Do Not Disturb state**. See [detail](https://github.com/c19354837/react-native-system-setting/issues/48).
+
+### Runtime permission for Android 6+
+
+Change *brightness* and *screen mode* need `android.permission.WRITE_SETTINGS` which user can disable it in phone Setting. When you call `setScreenMode()`, `setBrightness()` or `setBrightnessForce()` , it will return false if the app has no permission, and you can call `SystemSetting.grantWriteSettingPremission()` to guide user to app setting page. see [example](https://github.com/c19354837/react-native-system-setting/tree/master/examples/SystemSettingExample)
+
+> If you just want to change app's brightness, you can call `setAppBrightness(val)`, and it doesn't require any permission. see [API](https://github.com/c19354837/react-native-system-setting/blob/master/API.md)
 
 ## In the end
 

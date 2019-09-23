@@ -1,4 +1,4 @@
-import { NativeModules, NativeEventEmitter } from 'react-native'
+import { NativeModules, NativeEventEmitter, Linking, Platform } from 'react-native'
 
 import Utils from './Utils'
 
@@ -13,11 +13,12 @@ const eventEmitter = new NativeEventEmitter(SystemSettingNative)
 export default class SystemSetting {
     static saveBrightnessVal = -1
     static saveScreenModeVal = SCREEN_BRIGHTNESS_MODE_AUTOMATIC
-    static isAppStore = undefined
-    static appStoreWarn = 'You must call SystemSetting.setAppStore(isAppStore:bool) explicitly. Set it true if you are developing a AppStore version, or false'
 
-    static setAppStore(isAppStore) {
-        this.isAppStore = isAppStore
+    /**
+     * @deprecated
+     */
+    static setAppStore() {
+        console.warn("You don't need call setAppStore() anymore since V1.7.0")
     }
 
     static async getBrightness() {
@@ -139,10 +140,6 @@ export default class SystemSetting {
     }
 
     static switchWifi(complete) {
-        if (this._switchingCheck()) {
-            complete();
-            return;
-        }
         SystemSetting.listenEvent(complete)
         SystemSettingNative.switchWifi()
     }
@@ -152,18 +149,14 @@ export default class SystemSetting {
     }
 
     static async getLocationMode() {
-        if(Utils.isAndroid){
+        if (Utils.isAndroid) {
             return await SystemSettingNative.getLocationMode()
-        }else{
+        } else {
             return await SystemSetting.isLocationEnabled() ? 1 : 0
         }
     }
 
     static switchLocation(complete) {
-        if (this._switchingCheck()) {
-            complete();
-            return;
-        }
         SystemSetting.listenEvent(complete)
         SystemSettingNative.switchLocation()
     }
@@ -173,10 +166,6 @@ export default class SystemSetting {
     }
 
     static switchBluetooth(complete) {
-        if (this._switchingCheck()) {
-            complete();
-            return;
-        }
         SystemSetting.listenEvent(complete)
         SystemSettingNative.switchBluetooth()
     }
@@ -195,23 +184,25 @@ export default class SystemSetting {
     }
 
     static switchAirplane(complete) {
-        if (this._switchingCheck()) {
-            complete();
-            return;
-        }
         SystemSetting.listenEvent(complete)
         SystemSettingNative.switchAirplane()
     }
 
-    static _switchingCheck() {
-        if (Utils.isIOS) {
-            if (this.isAppStore === undefined) {
-                console.warn(this.appStoreWarn)
-            } else if (this.isAppStore === true) {
-                return true;
+    static async openAppSystemSettings() {
+        switch(Platform.OS) {
+            case 'ios': {
+                const settingsLink = 'app-settings:';
+                const supported = await Linking.canOpenURL(settingsLink)
+                if (supported) await Linking.openURL(settingsLink);
+                break;
             }
+            case 'android': 
+                await SystemSettingNative.openAppSystemSettings()
+                break;
+            default:
+                throw new Error('unknown platform')
+                break;    
         }
-        return false;
     }
 
     static async addBluetoothListener(callback) {
@@ -224,6 +215,10 @@ export default class SystemSetting {
 
     static async addLocationListener(callback) {
         return await SystemSetting._addListener(true, 'location', 'EventLocationChange', callback)
+    }
+
+    static async addLocationModeListener(callback) {
+        return await SystemSetting._addListener(true, 'locationMode', 'EventLocationModeChange', callback)
     }
 
     static async addAirplaneListener(callback) {

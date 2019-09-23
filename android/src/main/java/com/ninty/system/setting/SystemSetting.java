@@ -1,6 +1,7 @@
 package com.ninty.system.setting;
 
 import android.app.Activity;
+import android.app.NotificationManager;
 import android.bluetooth.BluetoothAdapter;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -45,12 +46,12 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
     private AudioManager am;
     private WifiManager wm;
     private LocationManager lm;
-    private BroadcastReceiver volumeBR;
+    private VolumeBroadcastReceiver volumeBR;
     private volatile BroadcastReceiver wifiBR;
     private volatile BroadcastReceiver bluetoothBR;
     private volatile BroadcastReceiver locationBR;
+    private volatile BroadcastReceiver locationModeBR;
     private volatile BroadcastReceiver airplaneBR;
-    private IntentFilter filter;
 
     public SystemSetting(ReactApplicationContext reactContext) {
         super(reactContext);
@@ -60,35 +61,22 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
         wm = (WifiManager) mContext.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         lm = (LocationManager) mContext.getApplicationContext().getSystemService(Context.LOCATION_SERVICE);
 
-        listenVolume(reactContext);
+        volumeBR = new VolumeBroadcastReceiver();
     }
 
-    private void listenVolume(final ReactApplicationContext reactContext) {
-        volumeBR = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                if (intent.getAction().equals("android.media.VOLUME_CHANGED_ACTION")) {
-                    WritableMap para = Arguments.createMap();
-                    para.putDouble("value", getNormalizationVolume(VOL_MUSIC));
-                    para.putDouble(VOL_VOICE_CALL, getNormalizationVolume(VOL_VOICE_CALL));
-                    para.putDouble(VOL_SYSTEM, getNormalizationVolume(VOL_SYSTEM));
-                    para.putDouble(VOL_RING, getNormalizationVolume(VOL_RING));
-                    para.putDouble(VOL_MUSIC, getNormalizationVolume(VOL_MUSIC));
-                    para.putDouble(VOL_ALARM, getNormalizationVolume(VOL_ALARM));
-                    para.putDouble(VOL_NOTIFICATION, getNormalizationVolume(VOL_NOTIFICATION));
-                    try {
-                        reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
-                            .emit("EventVolume", para);
-                    } catch (RuntimeException e) {
-                        // Possible to interact with volume before JS bundle execution is finished. 
-                        // This is here to avoid app crashing.
-                    }
-                }
-            }
-        };
-        filter = new IntentFilter("android.media.VOLUME_CHANGED_ACTION");
+    private void registerVolumeReceiver() {
+        if (!volumeBR.isRegistered()) {
+            IntentFilter filter = new IntentFilter("android.media.VOLUME_CHANGED_ACTION");
+            mContext.registerReceiver(volumeBR, filter);
+            volumeBR.setRegistered(true);
+        }
+    }
 
-        reactContext.registerReceiver(volumeBR, filter);
+    private void unregisterVolumeReceiver() {
+        if (volumeBR.isRegistered()) {
+            mContext.unregisterReceiver(volumeBR);
+            volumeBR.setRegistered(false);
+        }
     }
 
     private void listenWifiState() {
@@ -163,6 +151,28 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
         }
     }
 
+    private void listenLocationModeState() {
+        if (locationModeBR == null) {
+            synchronized (this) {
+                if (locationModeBR == null) {
+                    locationModeBR = new BroadcastReceiver() {
+                        @Override
+                        public void onReceive(Context context, Intent intent) {
+                            if (intent.getAction().equals(LocationManager.MODE_CHANGED_ACTION)) {
+                                mContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+                                        .emit("EventLocationModeChange", getLocationMode());
+                            }
+                        }
+                    };
+                    IntentFilter locationFilter = new IntentFilter();
+                    locationFilter.addAction(LocationManager.MODE_CHANGED_ACTION);
+
+                    mContext.registerReceiver(locationModeBR, locationFilter);
+                }
+            }
+        }
+    }
+
     private void listenAirplaneState() {
         if (airplaneBR == null) {
             synchronized (this) {
@@ -175,7 +185,7 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
                                 mContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
                                         .emit("EventAirplaneChange", val == 1);
                             } catch (Settings.SettingNotFoundException e) {
-                                e.printStackTrace();
+                                Log.e(TAG, "err", e);
                             }
                         }
                     };
@@ -205,7 +215,7 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
             int mode = Settings.System.getInt(mContext.getContentResolver(), Settings.System.SCREEN_BRIGHTNESS_MODE);
             promise.resolve(mode);
         } catch (Settings.SettingNotFoundException e) {
-            e.printStackTrace();
+            Log.e(TAG, "err", e);
             promise.reject("-1", "get screen mode fail", e);
         }
     }
@@ -247,7 +257,7 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
                 promise.resolve(result);
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            Log.e(TAG, "err", e);
             promise.reject("-1", "get app's brightness fail", e);
         }
     }
@@ -264,14 +274,14 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
             int val = Settings.System.getInt(mContext.getContentResolver(), Settings.System.SCREEN_BRIGHTNESS);
             promise.resolve(val * 1.0f / 255);
         } catch (Settings.SettingNotFoundException e) {
-            e.printStackTrace();
+            Log.e(TAG, "err", e);
             promise.reject("-1", "get brightness fail", e);
         }
     }
 
     @ReactMethod
     public void setVolume(float val, ReadableMap config) {
-        mContext.unregisterReceiver(volumeBR);
+        unregisterVolumeReceiver();
         String type = config.getString("type");
         boolean playSound = config.getBoolean("playSound");
         boolean showUI = config.getBoolean("showUI");
@@ -283,8 +293,22 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
         if (showUI) {
             flags |= AudioManager.FLAG_SHOW_UI;
         }
-        am.setStreamVolume(volType, (int) (val * am.getStreamMaxVolume(volType)), flags);
-        mContext.registerReceiver(volumeBR, filter);
+        try {
+            am.setStreamVolume(volType, (int) (val * am.getStreamMaxVolume(volType)), flags);
+        } catch (SecurityException e) {
+            if (val == 0) {
+                Log.w(TAG, "setVolume(0) failed. See https://github.com/c19354837/react-native-system-setting/issues/48");
+                NotificationManager notificationManager =
+                        (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                        && !notificationManager.isNotificationPolicyAccessGranted()) {
+                    Intent intent = new Intent(android.provider.Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS);
+                    mContext.startActivity(intent);
+                }
+            }
+            Log.e(TAG, "err", e);
+        }
+        registerVolumeReceiver();
     }
 
     @ReactMethod
@@ -304,10 +328,10 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
                     reject = true;
                 }
             } catch (Settings.SettingNotFoundException e) {
-                e.printStackTrace();
+                Log.e(TAG, "err", e);
                 //ignore
             } catch (SecurityException e) {
-                e.printStackTrace();
+                Log.e(TAG, "err", e);
                 reject = true;
             }
         }
@@ -376,17 +400,21 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
     @ReactMethod
     public void getLocationMode(Promise promise) {
         if (lm != null) {
-            int result = 0;
-            if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                result |= 1;
-            }
-            if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                result |= 1 << 1;
-            }
-            promise.resolve(result);
+            promise.resolve(getLocationMode());
         } else {
             promise.reject("-1", "get location manager fail");
         }
+    }
+
+    private int getLocationMode() {
+        int result = 0;
+        if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+            result |= 1;
+        }
+        if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+            result |= 1 << 1;
+        }
+        return result;
     }
 
     private boolean isLocationEnable() {
@@ -438,6 +466,10 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
                 listenLocationState();
                 promise.resolve(null);
                 return;
+            case "locationMode":
+                listenLocationModeState();
+                promise.resolve(null);
+                return;
             case "airplane":
                 listenAirplaneState();
                 promise.resolve(null);
@@ -452,7 +484,7 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
             int val = Settings.System.getInt(mContext.getContentResolver(), Settings.System.AIRPLANE_MODE_ON);
             promise.resolve(val == 1);
         } catch (Settings.SettingNotFoundException e) {
-            e.printStackTrace();
+            Log.e(TAG, "err", e);
             promise.reject("-1", "get airplane mode fail", e);
         }
     }
@@ -469,6 +501,17 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
             mContext.getCurrentActivity().startActivityForResult(intent, setting.requestCode);
         } else {
             Log.w(TAG, "getCurrentActivity() return null, switch will be ignore");
+        }
+    }
+
+    @ReactMethod
+    public void openAppSystemSettings() {
+        Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY);
+        intent.setData(Uri.parse("package:" + mContext.getPackageName()));
+        if (intent.resolveActivity(mContext.getPackageManager()) != null) {
+            mContext.startActivity(intent);
         }
     }
 
@@ -489,17 +532,16 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
 
     @Override
     public void onHostResume() {
-
+        registerVolumeReceiver();
     }
 
     @Override
     public void onHostPause() {
-
+        unregisterVolumeReceiver();
     }
 
     @Override
     public void onHostDestroy() {
-        mContext.unregisterReceiver(volumeBR);
         if (wifiBR != null) {
             mContext.unregisterReceiver(wifiBR);
             wifiBR = null;
@@ -512,11 +554,47 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
             mContext.unregisterReceiver(locationBR);
             locationBR = null;
         }
+        if (locationModeBR != null) {
+            mContext.unregisterReceiver(locationModeBR);
+            locationBR = null;
+        }
         if (airplaneBR != null) {
             mContext.unregisterReceiver(airplaneBR);
             airplaneBR = null;
         }
+    }
 
-        mContext.removeLifecycleEventListener(this);
+    private class VolumeBroadcastReceiver extends BroadcastReceiver {
+
+        private boolean isRegistered = false;
+
+        public void setRegistered(boolean registered) {
+            isRegistered = registered;
+        }
+
+        public boolean isRegistered() {
+            return isRegistered;
+        }
+
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent.getAction().equals("android.media.VOLUME_CHANGED_ACTION")) {
+                WritableMap para = Arguments.createMap();
+                para.putDouble("value", getNormalizationVolume(VOL_MUSIC));
+                para.putDouble(VOL_VOICE_CALL, getNormalizationVolume(VOL_VOICE_CALL));
+                para.putDouble(VOL_SYSTEM, getNormalizationVolume(VOL_SYSTEM));
+                para.putDouble(VOL_RING, getNormalizationVolume(VOL_RING));
+                para.putDouble(VOL_MUSIC, getNormalizationVolume(VOL_MUSIC));
+                para.putDouble(VOL_ALARM, getNormalizationVolume(VOL_ALARM));
+                para.putDouble(VOL_NOTIFICATION, getNormalizationVolume(VOL_NOTIFICATION));
+                try {
+                    mContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+                            .emit("EventVolume", para);
+                } catch (RuntimeException e) {
+                    // Possible to interact with volume before JS bundle execution is finished.
+                    // This is here to avoid app crashing.
+                }
+            }
+        }
     }
 }

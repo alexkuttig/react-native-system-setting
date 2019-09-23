@@ -10,16 +10,27 @@
 #import <SystemConfiguration/CaptiveNetwork.h>
 #import <CoreLocation/CoreLocation.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
-#import <CoreBluetooth/CoreBluetooth.h>
 #import <ifaddrs.h>
 #import <net/if.h>
+
+#ifdef BLUETOOTH
+#import <CoreBluetooth/CoreBluetooth.h>
+#endif
 
 @import UIKit;
 @import MediaPlayer;
 
-@implementation RCTSystemSetting{
+@interface RCTSystemSetting()
+#ifdef BLUETOOTH
+<CBCentralManagerDelegate>
+#endif
+@end
+
+@implementation RCTSystemSetting {
     bool hasListeners;
+#ifdef BLUETOOTH
     CBCentralManager *cb;
+#endif
     NSDictionary *setting;
     MPVolumeView *volumeView;
     UISlider *volumeSlider;
@@ -32,19 +43,22 @@
                                                  selector:@selector(volumeChanged:)
                                                      name:@"AVSystemController_SystemVolumeDidChangeNotification"
                                                    object:nil];
-
+#ifdef BLUETOOTH
         cb = [[CBCentralManager alloc] initWithDelegate:nil queue:nil options:@{CBCentralManagerOptionShowPowerAlertKey: @NO}];
+#endif
     }
 
     [self initVolumeView];
+#ifdef PRIVATE_API
     [self initSetting];
+#endif
 
     return self;
 }
 
 -(void)initVolumeView{
     volumeView = [[MPVolumeView alloc] initWithFrame:CGRectMake(-[UIScreen mainScreen].bounds.size.width, 0, 0, 0)];
-    [self showVolumeUI:NO];
+    [self showVolumeUI:YES];
     for (UIView* view in volumeView.subviews) {
         if ([view.class.description isEqualToString:@"MPVolumeSlider"]){
             volumeSlider = (UISlider*)view;
@@ -53,14 +67,16 @@
     }
 }
 
+#ifdef PRIVATE_API
 -(void)initSetting{
     BOOL newSys = [UIDevice currentDevice].systemVersion.doubleValue >= 10.0;
-    setting = @{@"wifi": (newSys?@"QXBwLVByZWZzOnJvb3Q9V0lGSQ==" : @"cHJlZnM6cm9vdD1XSUZJ"),
-                @"location": (newSys?@"QXBwLVByZWZzOnJvb3Q9UHJpdmFjeSZwYXRoPUxPQ0FUSU9O" : @"cHJlZnM6cm9vdD1Qcml2YWN5JnBhdGg9TE9DQVRJT04="),
-                @"bluetooth": (newSys?@"QXBwLVByZWZzOnJvb3Q9Qmx1ZXRvb3Ro" : @"cHJlZnM6cm9vdD1CbHVldG9vdGg="),
-                @"airplane": (newSys?@"QXBwLVByZWZzOnJvb3Q9QUlSUExBTkVfTU9ERQ==" : @"cHJlZnM6cm9vdD1BSVJQTEFORV9NT0RF")
+    setting = @{@"wifi": (newSys?@"App-Prefs:root=WIFI" : @"prefs:root=WIFI"),
+                @"location": (newSys?@"App-Prefs:root=Privacy&path=LOCATION" : @"prefs:root=Privacy&path=LOCATION"),
+                @"bluetooth": (newSys?@"App-Prefs:root=Bluetooth" : @"prefs:root=Bluetooth"),
+                @"airplane": (newSys?@"App-Prefs:root=AIRPLANE_MODE" : @"prefs:root=AIRPLANE_MODE")
                 };
 }
+#endif
 
 +(BOOL)requiresMainQueueSetup{
     return YES;
@@ -112,8 +128,13 @@ RCT_EXPORT_METHOD(switchBluetooth){
 }
 
 RCT_EXPORT_METHOD(isBluetoothEnabled:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject){
+#ifdef BLUETOOTH
     bool isEnabled = cb.state == CBManagerStatePoweredOn;
     resolve([NSNumber numberWithBool:isEnabled]);
+#else
+    NSLog(@"You need add BLUETOOTH in preprocess macros, see https://github.com/c19354837/react-native-system-setting/blob/master/iOS.md");
+    resolve([NSNumber numberWithBool:NO]);
+#endif
 }
 
 RCT_EXPORT_METHOD(switchAirplane){
@@ -128,7 +149,9 @@ RCT_EXPORT_METHOD(isAirplaneEnabled:(RCTPromiseResolveBlock)resolve rejecter:(RC
 
 RCT_EXPORT_METHOD(activeListener:(NSString *)type resolve:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject){
     if([type isEqualToString:@"bluetooth"]){
+#ifdef BLUETOOTH
         [cb setDelegate:self];
+#endif
         resolve(@YES);
     }else{
          reject(@"-1", [NSString stringWithFormat:@"unsupported listener type: %@", type], nil);
@@ -144,18 +167,18 @@ RCT_EXPORT_METHOD(activeListener:(NSString *)type resolve:(RCTPromiseResolveBloc
 }
 
 -(void)openSetting:(NSString*)service{
-    NSString *url = [self dencodeStr:[setting objectForKey:service]];
-    [[UIApplication sharedApplication] openURL:[NSURL URLWithString:url] options:[NSDictionary new] completionHandler:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(applicationWakeUp:)
-                                                 name:UIApplicationWillEnterForegroundNotification
-                                               object:nil];
-}
-
-- (NSString *)dencodeStr:(NSString *)string{
-    NSData *data = [[NSData alloc]initWithBase64EncodedString:string options:NSDataBase64DecodingIgnoreUnknownCharacters];
-    NSString *result = [[NSString alloc]initWithData:data encoding:NSUTF8StringEncoding];
-    return result;
+#ifdef PRIVATE_API
+    NSString *url = [setting objectForKey:service];
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        [[UIApplication sharedApplication] openURL:[NSURL URLWithString:url] options:[NSDictionary new] completionHandler:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(applicationWakeUp:)
+                                                     name:UIApplicationWillEnterForegroundNotification
+                                                   object:nil];
+    });
+#else
+    NSLog(@"Fail to open [%@]. These APIs which start with 'switch*()' will cause a rejection from App Store, and you can use these APIs only when you distribute app outside App Store, see see https://github.com/c19354837/react-native-system-setting/blob/master/iOS.md", service);
+#endif
 }
 
 -(BOOL)isWifiEnabled{
@@ -197,6 +220,7 @@ RCT_EXPORT_METHOD(activeListener:(NSString *)type resolve:(RCTPromiseResolveBloc
     }
 }
 
+#ifdef BLUETOOTH
 -(void)centralManagerDidUpdateState:(CBCentralManager *)central{
     switch (central.state) {
         case CBManagerStatePoweredOff:
@@ -213,5 +237,6 @@ RCT_EXPORT_METHOD(activeListener:(NSString *)type resolve:(RCTPromiseResolveBloc
             break;
     }
 }
+#endif
 
 @end
